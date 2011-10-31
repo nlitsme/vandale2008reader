@@ -476,10 +476,10 @@ public:
 
         // todo: bitmap
         //
-        if (_ptable4)
-            dump45();
-        else
-            dump3();
+//      if (_ptable4)
+//          dump45();
+//      else
+//          dump3();
     }
     std::string getword(uint32_t ix)
     {
@@ -570,6 +570,147 @@ public:
         }
     }
 
+    struct lessthen {
+        bool operator()(const std::string &l, const std::string &r)
+        {
+            // todo: utf8 stringcompare ( which correctly handles multibyte characters
+            return stringicompare(l,r)<0;
+        }
+    };
+    // returns set of headword indexes matching str
+    std::set<uint32_t> stringsearch(const std::string& str)
+    {
+        lessthen lt;
+        ReadWriter_ptr rtw= makexorreader(_pwords, _lwords);
+        ReadWriter_ptr rt3= makexorreader(_ptable3, 4*_count1);
+
+        auto first= stringiterator(rt3, rtw, 0);
+        auto last= stringiterator(rt3, rtw, _count1);
+        auto i= std::lower_bound(first, last, str, lt);
+        //  *i<str && str<=*(i+1)    .. str < *(i+n)
+        if (i==last)
+            return std::set<uint32_t>();
+
+        ++i;
+
+        ReadWriter_ptr rt1= makexorreader(_ptable1, 4*_count1);
+        std::set<uint32_t> items;
+        while (i!=last && !lt(str, *i)) {
+            items.insert(rt1->read32le(4*i.index()));
+            ++i;
+        }
+        return items;
+    }
+
+    // returns set of headword indexes matching str
+    std::set<uint32_t> substrsearch(const std::string& str)
+    {
+        lessthen lt;
+        ReadWriter_ptr rtw= makexorreader(_pwords, _lwords);
+        ReadWriter_ptr rt4= makexorreader(_ptable4, 6*_count2);
+
+        auto first= substriterator(rt4, rtw, 0);
+        auto last= substriterator(rt4, rtw, _count2);
+        auto i= std::lower_bound(first, last, str, lt);
+        //  *i<str && str<=*(i+1)    .. str < *(i+n)
+        if (i==last)
+            return std::set<uint32_t>();
+
+        ReadWriter_ptr rt5= makexorreader(_ptable5, 4*_count2);
+        ReadWriter_ptr rt1= makexorreader(_ptable1, 4*_count1);
+        std::set<uint32_t> items;
+        while (i!=last && !lt(str, *i)) {
+            uint32_t t5val= rt5->read32le(4*i.index());
+            items.insert(rt1->read32le(4*t5val));
+            ++i;
+        }
+        return items;
+    }
+
+    class iterator {
+    protected:
+        ReadWriter_ptr _tab;
+        ReadWriter_ptr _words;
+        uint32_t _ix;
+    public:
+        typedef std::string& reference;
+        typedef std::string* pointer;
+        typedef int difference_type;
+        typedef std::string value_type;
+        typedef std::random_access_iterator_tag iterator_category;
+
+        iterator(ReadWriter_ptr tab, ReadWriter_ptr words, uint32_t ix)
+            : _tab(tab), _words(words), _ix(ix)
+        {
+        }
+        iterator()
+            : _ix(0)
+        {
+        }
+        iterator& operator++()
+        {
+            _ix++;
+            return *this;
+        }
+        iterator operator++(int)
+        {
+            iterator copy= *this;
+            operator++();
+            return copy;
+        }
+        iterator& operator+=(int n) { _ix+=n; return *this; }
+        iterator operator+(int n) { return iterator(_tab, _words, _ix+n); }
+        iterator& operator-=(int n) { _ix-=n; return *this; }
+        iterator operator-(int n) { return iterator(_tab, _words, _ix-n); }
+        int operator-(const iterator&rhs) const { return _ix-rhs._ix; }
+
+        bool operator==(const iterator&rhs) const { return _ix==rhs._ix; }
+        bool operator!=(const iterator&rhs) const { return _ix!=rhs._ix; }
+        bool operator<=(const iterator&rhs) const { return _ix<=rhs._ix; }
+        bool operator< (const iterator&rhs) const { return _ix< rhs._ix; }
+        bool operator>=(const iterator&rhs) const { return _ix>=rhs._ix; }
+        bool operator> (const iterator&rhs) const { return _ix> rhs._ix; }
+
+        uint32_t index() const { return _ix; }
+    };
+
+
+    class stringiterator : public iterator {
+    public:
+        stringiterator(ReadWriter_ptr tab, ReadWriter_ptr words, uint32_t ix)
+            : iterator(tab, words, ix)
+        {
+        }
+        stringiterator() { }
+        std::string operator*()
+        {
+            _tab->setpos(4*_ix);
+            uint32_t wofs= _tab->read32le();
+            _words->setpos(wofs);
+            uint16_t wlen= _words->read16le();
+
+            return _words->readstr(wlen);
+        }
+    };
+
+    class substriterator : public iterator {
+    public:
+        substriterator(ReadWriter_ptr tab, ReadWriter_ptr words, uint32_t ix)
+            : iterator(tab, words, ix)
+        {
+        }
+        substriterator() { }
+        std::string operator*()
+        {
+            _tab->setpos(6*_ix);
+            uint32_t wofs= _tab->read32le();
+            uint16_t strofs= _tab->read16le();
+            _words->setpos(wofs);
+            uint16_t wlen= _words->read16le();
+
+            return _words->readstr(wofs+2+strofs, wlen-strofs);
+        }
+    };
 };
 typedef boost::shared_ptr<IndexSection> IndexSection_ptr;
 
@@ -638,6 +779,9 @@ public:
         }
         printf("%s\n", copyright.c_str());
     }
+
+    // fulltext substring -> idxFulltextLemma
+    // keyword substring -> idxTrefwoordLemma
 };
 
 int main(int argc, char**argv)
