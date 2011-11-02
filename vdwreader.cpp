@@ -8,7 +8,56 @@
 #include <array>
 #include <set>
 #include <map>
+#include "args.h"
 
+class areausage {
+    struct areainfo {
+        uint32_t offset;
+        uint32_t length;
+        std::string desc;
+
+        areainfo(uint32_t offset, uint32_t length, const std::string& desc)
+            : offset(offset), length(length), desc(desc)
+        {
+        }
+
+    };
+    typedef std::map<uint32_t,areainfo> areamap;
+
+    uint32_t _size;
+    areamap _map;
+public:
+    areausage (uint32_t size)
+        : _size(size)
+    {
+    }
+    void add(uint32_t offset, uint32_t length, const std::string& desc)
+    {
+        _map.insert(areamap::value_type(offset, areainfo(offset, length, desc)));
+    }
+
+    void dump()
+    {
+        uint32_t ofs= 0;
+        for (auto i : _map)
+        {
+            if (ofs<i.first) {
+                printf("... gap: %08x-%08x\n", ofs, i.first);
+            }
+            else if (ofs>i.first) {
+                printf("... overlap: %08x-%08x\n", i.first, ofs);
+            }
+            printf("%08x-%08x: %s\n", i.second.offset, i.second.offset+i.second.length, i.second.desc.c_str());
+            ofs= i.second.offset+i.second.length;
+        }
+        if (ofs<_size) {
+            printf("... gap: %08x-%08x\n", ofs, _size);
+        }
+        else if (ofs>_size) {
+            printf("... too large: %08x-%08x\n", _size, ofs);
+        }
+    }
+};
 std::map<std::string,std::string> keymap= {
     { "dn", "7F54B1D3-4653-4D59-B9E8-2AB8A405A5EB" },
     { "en", "6F6820A6-81A3-49A8-BAAA-10EFFC00E9BC" },
@@ -151,7 +200,13 @@ class Section {
     const uint8_t* _last;
     std::string _name;
     std::string _desc;
+
+    areausage _usage;
 protected:
+    void usage(uint32_t offset, uint32_t length, const std::string& desc)
+    {
+        _usage.add(offset, length, desc);
+    }
     void setname(const std::string& name) { _name= name; }
     void setdesc(const std::string& desc) { _desc= desc; }
 
@@ -177,12 +232,16 @@ protected:
     {
         uint32_t p= r->read32le();
         uint32_t l1= r->read32le();
-        /*uint32_t l2=*/ r->read32le();
+        uint32_t l2= r->read32le();
+        if (l1!=l2)
+            printf("WARN: 2nd string length mismatch: %08x->%d/%d\n", p, l1, l2);
 
         return readstr(p, l1);
     }
     std::string readstr(uint32_t p, uint32_t l)
     {
+        usage(p,l, "string");
+
         ReadWriter_ptr srd= makexorreader(p, l);
 
         return srd->readstr();
@@ -213,8 +272,9 @@ public:
     uint32_t type() const { return _type; }
 
     Section(const std::vector<uint8_t>& M, uint32_t type, const uint8_t* first, const uint8_t* last)
-        : M(M), _type(type), _first(first), _last(last)
+        : M(M), _type(type), _first(first), _last(last), _usage(last-first)
     {
+        usage(0, 16, "plain, section md5");
     }
     const std::string& name() const { return _name; }
     const std::string& desc() const { return _desc; }
@@ -237,7 +297,44 @@ public:
 
         verifysection();
     }
+    void dumpusage()
+    {
+        printf("usage of section %s\n", _name.c_str());
+        _usage.dump();
+    }
 
+    void savedata(uint32_t ofs, uint32_t len, const std::string& path, const std::string& dataname)
+    {
+        ReadWriter_ptr rd= makexorreader(ofs, len);
+        ReadWriter_ptr wr(new FileReader(stringformat("%s/%s.%s", path.c_str(), name().c_str(), dataname.c_str()), FileReader::createnew));
+        rd->copyto(wr);
+    }
+    void saveplain(uint32_t ofs, uint32_t len, const std::string& path, const std::string& dataname)
+    {
+        ReadWriter_ptr wr(new FileReader(stringformat("%s/%s.%s", path.c_str(), name().c_str(), dataname.c_str()), FileReader::createnew));
+
+        while (len) {
+            if (len<4) {
+                printf("WARN: blob error\n");
+                break;
+            }
+            uint32_t chunk= get32le(getptr(ofs)); ofs+=4; len-=4;
+
+            if (len<chunk) {
+                printf("WARN: blob error\n");
+                break;
+            }
+
+            ReadWriter_ptr M(new MemoryReader(getptr(ofs), chunk));
+            ReadWriter_ptr D(new CompressedReader(M));
+            D->copyto(wr);
+            ofs+=chunk;
+            len-=chunk;
+        }
+    }
+    virtual void saveall(const std::string& path)
+    {
+    }
 };
 typedef boost::shared_ptr<Section> Section_ptr;
 
@@ -262,6 +359,8 @@ class RootSection : public Section {
         uint32_t ofs= r->read32le();
         uint32_t len= r->read32le();
 
+        usage(ofs, len, "rootindex");
+
         printf("index[%08x %08x]\n", ofs, len);
 
         ReadWriter_ptr I= makexorreader(ofs, len);
@@ -280,7 +379,6 @@ class RootSection : public Section {
                 uint32_t glen= I->read32le();
                 uint32_t unk= I->read32le();
                 printf("%08x: %08x %08x [ %08x ]\n", type, gofs, glen, unk);
-                //dumpblobsection(M, filebase,siz, ptr);
                 _ixlist.push_back(indexptr(type, gofs, glen));
             }
             else if ((type>>16)==3) {
@@ -298,11 +396,12 @@ class RootSection : public Section {
 
 
 public:
-    virtual uint32_t headersize() const { return 0xb0; }
+    virtual uint32_t headersize() const { return 0xac; }
 
     RootSection(const std::vector<uint8_t>& M, uint32_t type, const uint8_t* first, const uint8_t* last)
         : Section(M, type, first, last)
     {
+        usage(0x10, headersize(), "root section header");
         ReadWriter_ptr hdr= makehdrreader();
 
         hdr->setpos(16);
@@ -315,11 +414,19 @@ public:
 
         readindex(hdr);
         readindex(hdr);
-        printf("%08x %08x       dw+strings\n", hdr->read32le(), hdr->read32le());
+        uint32_t strofs= hdr->read32le();
+        uint32_t strlen= hdr->read32le();
+        usage(strofs, strlen, "dw+strings");
+        printf("%08x %08x       dw+strings\n", strofs, strlen);
         readindex(hdr);
         readindex(hdr);
-        for (int i=5 ; i<12 ; i++)
-            printf("%08x %08x       pix%d\n", hdr->read32le(), hdr->read32le(), i);
+        for (int i=5 ; i<12 ; i++) {
+            uint32_t xofs= hdr->read32le();
+            uint32_t xlen= hdr->read32le();
+            printf("%08x %08x       pix%d\n", xofs, xlen, i);
+            if (xlen)
+                usage(xofs, xlen, stringformat("pix%d", i));
+        }
     }
     bool getsection(unsigned n, uint32_t *ofs, uint32_t *len, uint32_t *type)
     {
@@ -342,6 +449,17 @@ class BlobSection : public Section {
            
     uint32_t _ptab;
     uint32_t _stab;
+
+    struct strinfo {
+        uint32_t ofs;
+        uint32_t len;
+
+        strinfo(uint32_t ofs, uint32_t len)
+            : ofs(ofs), len(len)
+        {
+        }
+    };
+    std::vector<strinfo> _strs;
 #if 0
     void decompress(uint32_t blobofs)
     {
@@ -383,6 +501,7 @@ public:
     BlobSection(const std::vector<uint8_t>& M, uint32_t type, const uint8_t* first, const uint8_t* last)
         : Section(M, type, first, last)
     {
+        usage(0x10, headersize(), "blob section header");
         ReadWriter_ptr hdr= makehdrreader();
 
         hdr->setpos(0x10);
@@ -392,14 +511,38 @@ public:
         hdr->setpos(0x38);
         _pblob= hdr->read32le();
         _sblob= hdr->read32le();
+        usage(_pblob, _sblob, "compressed blob");
 
         _ptab= hdr->read32le();
         _stab= hdr->read32le();
+        usage(_ptab, _stab, "blob index");
 
         //dumpblobsection(_ptab, _stab);
 
         setname(readstr(hdr));
         setdesc(readstr(hdr));
+        for (int i=0 ; i<8 ; i++)
+        {
+            uint32_t sofs= hdr->read32le();
+            uint32_t sl1= hdr->read32le();
+            uint32_t sl2= hdr->read32le();
+            uint32_t snul= hdr->read32le();
+            if (sl1 || sl2)
+                printf("%08x:%08x(%+3d)  longstring\n", sofs, sl1, sl2-sl1);
+            if (snul)
+                printf("WARN: !=0: %08x\n", snul);
+            if (sl1) {
+                usage(sofs, sl1, "longstring");
+                _strs.push_back(strinfo(sofs, sl1));
+            }
+        }
+    }
+    virtual void saveall(const std::string& path)
+    {
+        savedata(_ptab, _stab, path, "table");
+        saveplain(_pblob, _sblob, path, "blob");
+        for (unsigned i=0 ; i<_strs.size() ; i++)
+            savedata(_strs[i].ofs, _strs[i].len, path, stringformat("string%d", i));
     }
     std::string getitem(uint32_t ix)
     {
@@ -411,7 +554,9 @@ public:
         uint32_t blobofs= I->read32le();
         uint32_t streamofs= I->read32le();
         uint32_t itemsize= I->read32le();
-        /*uint32_t unknul=*/ I->read16le();
+        uint32_t unknul= I->read16le();
+        if (unknul!=0)
+            printf("WARN: item unk!=0: %04x\n", unknul);
 
         //printf("B+%08x, S+%08x/%08x\n", blobofs, streamofs, itemsize);
 
@@ -442,7 +587,9 @@ class IndexSection : public Section {
     uint32_t _ptable4;
     uint32_t _ptable5;
     uint32_t _lwords;
-
+    uint32_t _bm_count;
+    uint32_t _bm_ofs;
+    uint32_t _bm_len;
 public:
     virtual uint32_t headersize() const { return (type()&0xfffffff0)==0x0030100 ? 0xb4 : 0xc0; }
 
@@ -451,6 +598,7 @@ public:
             _count1(0), _count2(0), _ptable1(0), _ptable2(0), _ptable3(0),
             _pwords(0), _ptable4(0), _ptable5(0), _lwords(0)
     {
+        usage(0x10, headersize(), "index section header");
         ReadWriter_ptr hdr= makehdrreader();
         hdr->setpos(0x10);
         printf("idx: %08x %08x %08x %08x\n", hdr->read32le(), hdr->read32le(), hdr->read32le(), hdr->read32le());
@@ -458,35 +606,83 @@ public:
         uint32_t pstr2= hdr->read32le();
 
         uint32_t lstr1= hdr->read32le();
-        hdr->read32le();
+        uint32_t lstr1_2= hdr->read32le();
+        if (lstr1!=lstr1_2)
+            printf("WARN: strlen mismatch: %d!=%d\n", lstr1, lstr1_2);
         uint32_t lstr2= hdr->read32le();
-        hdr->read32le();
+        uint32_t lstr2_2= hdr->read32le();
+        if (lstr2!=lstr2_2)
+            printf("WARN: strlen mismatch: %d!=%d\n", lstr2, lstr2_2);
 
         setname(readstr(pstr1, lstr1));
         setdesc(readstr(pstr2, lstr2));
 
         hdr->setpos(0x48);
         _count1= hdr->read32le();
-        hdr->read32le();
+        uint32_t unk1= hdr->read32le();  // ??
         _count2= type==0x00030206 ? hdr->read32le() : 0;
-        hdr->read32le();
-        hdr->read32le();
+        uint32_t unk2= hdr->read32le();
+        uint32_t unk3= hdr->read32le();
         _ptable1= hdr->read32le();
+        if (unk2!=_ptable1 || unk3!=_ptable1)
+            printf("unkptrs != tab1: %08x %08x\n", unk2, unk3);
         _ptable2= hdr->read32le();
         _ptable3= hdr->read32le();
-        hdr->read32le();
+        uint32_t unk4= hdr->read32le();
+        if (unk4!=_ptable3)
+            printf("unkptr != tab3: %08x\n", unk4);
         _pwords= hdr->read32le();
         _ptable4= type==0x00030206 ? hdr->read32le() : 0;
         _ptable5= type==0x00030206 ? hdr->read32le() : 0;
-        hdr->read32le();
+        uint32_t unk5= hdr->read32le();
+        if (unk5!=0)
+            printf("unkval!=0 : %08x\n", unk5);
         _lwords= hdr->read32le();
 
-        // todo: bitmap
-        //
+        usage(_ptable1, _count1*4, "table1");
+        usage(_ptable2, _count1*4, "table2");
+        usage(_ptable3, _count1*4, "table3");
+        if (_ptable4) {
+            usage(_ptable4, _count2*6, "table4");
+            usage(_ptable5, _count2*4, "table5");
+        }
+        usage(_pwords, _lwords, "words");
+
+        // bitmap ??
+        for (int i=0 ; i<8 ; i++)
+        {
+            uint32_t bo= hdr->read32le();
+            uint32_t bl= hdr->read32le();
+            if (bl) {
+                std::string desc= i==0?"prebitmap":i==1?"bitmapptr":stringformat("unknownbitmap-%d", i);
+                printf("%08x %08x  %s\n", bo, bl, desc.c_str());
+                usage(bo, bl, desc);
+            }
+            if (i==1)
+            {
+                ReadWriter_ptr bmr= makexorreader(bo, bl);
+                _bm_count= bmr->read32le();
+                _bm_ofs= bmr->read32le();
+                _bm_len= bmr->read32le();
+                usage(_bm_ofs, _bm_len, "bitmap");
+            }
+        }
 //      if (_ptable4)
 //          dump45();
 //      else
 //          dump3();
+    }
+    virtual void saveall(const std::string& path)
+    {
+        savedata(_ptable1, _count1*4, path, "table1");
+        savedata(_ptable2, _count1*4, path, "table2");
+        savedata(_ptable3, _count1*4, path, "table3");
+        if (_ptable4) {
+            savedata(_ptable4, _count2*6, path, "table4");
+            savedata(_ptable5, _count2*4, path, "table5");
+        }
+        savedata(_pwords, _lwords, path, "words");
+        savedata(_bm_ofs, _bm_len, path, "bitmap");
     }
     std::string getword(uint32_t ix)
     {
@@ -546,7 +742,6 @@ public:
             std::string& s= tw[t5[i]];
             printf("%08x: 4[%08x/%04x]  5[%08x->%08x] %*s%s\n",
                     i, t4o[i], t4l[i], t5[i], t3o[t5[i]], 35-t4l[i], "", s.c_str());
-
         }
     }
     void dump3()
@@ -764,6 +959,9 @@ public:
 };
 typedef boost::shared_ptr<IndexSection> IndexSection_ptr;
 
+// todo: FilesSection
+// todo: GxxSection
+
 class VdwFile : public Section {
 
     RootSection_ptr _root;
@@ -786,14 +984,20 @@ public:
         setname("vdwfile");
         setdesc("vdwfile");
 
+        usage(0x2a, 20, "indexptrs");
+
         uint32_t unk0=  x->read32le();
         uint32_t troot= x->read32le();
         uint32_t proot= x->read32le();
         uint32_t sroot= x->read32le();
         _cplen= x->read32le();
 
+        usage(0x3e, 2*_cplen, "plain copyright");
+        usage(0x3e + 2*_cplen, 2*_cplen, "xorred copyright");
+
         printf("root: %d, %x, @%x:%x, copyrightlen=%x\n", unk0, troot, proot, sroot, _cplen);
 
+        usage(proot, sroot, "root section");
         _root= RootSection_ptr(new RootSection(M,  troot, getptr(proot), getptr(proot+sroot)));
 
         printf("name: %s\n", _root->name().c_str());
@@ -822,8 +1026,12 @@ public:
                     printf("not handling section %08x/%08x: t%08x\n", bofs, blen, btype);
             }
             if (s) {
+                usage(bofs, blen, stringformat("%08x: %s", btype, s->name().c_str()));
                 printf("%08x %08x %08x %s\n", btype, bofs, blen, s->name().c_str());
                 _sections.insert(sectionmap::value_type(s->name(), s));
+            }
+            else {
+                usage(bofs, blen, stringformat("%08x: ?", btype));
             }
         }
     }
@@ -835,7 +1043,22 @@ public:
                 blob->dumpinfo();
         });
     }
-
+    void dumpusage()
+    {
+        Section::dumpusage();
+        _root->dumpusage();
+        std::for_each(_sections.begin(), _sections.end(), [](const sectionmap::value_type& i) {
+            i.second->dumpusage();
+        });
+    }
+    void save(const std::string& path)
+    {
+        saveall(path);
+        _root->saveall(path);
+        std::for_each(_sections.begin(), _sections.end(), [&path](const sectionmap::value_type& i) {
+            i.second->saveall(path);
+        });
+    }
     virtual void verifysection()
     {
         std::string copyright= ToString(std::Wstring((WCHAR*)getptr(0x3e), ((WCHAR*)getptr(0x3e))+_cplen));
@@ -854,7 +1077,6 @@ public:
         std::for_each(_sections.begin(), _sections.end(), [](const sectionmap::value_type& i) {
             i.second->verify();
         });
-
     }
 
     IndexSection_ptr idx(const std::string& name) 
@@ -918,11 +1140,15 @@ int main(int argc, char**argv)
     std::string lang;
     std::vector<std::string> words;
     bool wantverify= false;
+    bool wantusage= false;
+    std::string savepath;
 
     for (int i=1 ; i<argc ; i++)
     {
         if (argv[i][0]=='-') switch(argv[i][1]) {
             case 'V': wantverify= true; break;
+            case 'U': wantusage= true; break;
+            case 'w': savepath= getstrarg(argv, i, argc); break;
         }
         else if (lang.empty())
             lang= argv[i];
@@ -951,6 +1177,10 @@ int main(int argc, char**argv)
 
     if (wantverify)
         vdw.verify();
+    if (wantusage)
+        vdw.dumpusage();
+    if (!savepath.empty())
+        vdw.save(savepath);
 
     for (unsigned i=0 ; i<words.size() ; i++)
     {
