@@ -231,12 +231,10 @@ protected:
     std::string readstr(ReadWriter_ptr r)
     {
         uint32_t p= r->read32le();
-        uint32_t l1= r->read32le();
-        uint32_t l2= r->read32le();
-        if (l1!=l2)
-            printf("WARN: 2nd string length mismatch: %08x->%d/%d\n", p, l1, l2);
+        uint32_t nbytes= r->read32le();
+        /*uint32_t nchars=*/ r->read32le();  // # utf8 symbols
 
-        return readstr(p, l1);
+        return readstr(p, nbytes);
     }
     std::string readstr(uint32_t p, uint32_t l)
     {
@@ -393,6 +391,10 @@ class RootSection : public Section {
             }
         }
     }
+    void readdwstrings(uint32_t ofs, uint32_t len)
+    {
+        usage(ofs, len, "dw+strings");
+    }
 
 
 public:
@@ -405,25 +407,34 @@ public:
         ReadWriter_ptr hdr= makehdrreader();
 
         hdr->setpos(16);
-        printf("%08x %08x %08x  section\n", hdr->read32le(), hdr->read32le(), hdr->read32le());
+        uint32_t unknown= hdr->read32le();
+        uint32_t size2= hdr->read32le();
+        uint32_t type2= hdr->read32le();
+        if (unknown!=1)
+            printf("WARN: !=1: %08x\n", unknown);
+        if (size2!=last-first)
+            printf("WARN: sectionsize mismatch: %08x (iso %08x)\n", size2, uint32_t(last-first));
+        if (type2!=type)
+            printf("WARN: sectiontype mismarch: %08x (iso %08x)\n", type2, type);
 
         setname(readstr(hdr));
         setdesc(readstr(hdr));
         _version= readstr(hdr);  printf("vers: %s\n", _version.c_str());
-        printf("%08x %08x %08x  unk\n", hdr->read32le(), hdr->read32le(), hdr->read32le());
+        printf("unknown: %08x %08x %08x\n", hdr->read32le(), hdr->read32le(), hdr->read32le());
 
         readindex(hdr);
         readindex(hdr);
-        uint32_t strofs= hdr->read32le();
-        uint32_t strlen= hdr->read32le();
-        usage(strofs, strlen, "dw+strings");
-        printf("%08x %08x       dw+strings\n", strofs, strlen);
+        uint32_t dwstrofs= hdr->read32le();
+        uint32_t dwstrlen= hdr->read32le();
+
+        readdwstrings(dwstrofs, dwstrlen);
+
         readindex(hdr);
         readindex(hdr);
         for (int i=5 ; i<12 ; i++) {
             uint32_t xofs= hdr->read32le();
             uint32_t xlen= hdr->read32le();
-            printf("%08x %08x       pix%d\n", xofs, xlen, i);
+            printf("%08x %08x     unknown  pix%d\n", xofs, xlen, i);
             if (xlen)
                 usage(xofs, xlen, stringformat("pix%d", i));
         }
@@ -504,11 +515,31 @@ public:
         usage(0x10, headersize(), "blob section header");
         ReadWriter_ptr hdr= makehdrreader();
 
-        hdr->setpos(0x10);
-        printf("%08x %08x %08x %08x  section\n", hdr->read32le(), hdr->read32le(), hdr->read32le(), hdr->read32le());
+        hdr->setpos(16);
+        uint32_t unknown= hdr->read32le();
+        uint32_t size2= hdr->read32le();
+        uint32_t type2= hdr->read32le();
+        uint32_t unknown2= hdr->read32le();
+        if (unknown!=1)
+            printf("WARN: +16  !=1: %08x\n", unknown);
+        if (size2!=last-first)
+            printf("WARN: sectionsize mismatch: %08x (iso %08x)\n", size2, uint32_t(last-first));
+        if (type2!=type)
+            printf("WARN: sectiontype mismarch: %08x (iso %08x)\n", type2, type);
+        if (unknown2!=1 && unknown2!=2)
+            printf("WARN: +28  !=1: %08x\n", unknown2);
+
 
         _nitems= hdr->read32le();
-        hdr->setpos(0x38);
+
+        uint32_t n_unk1=hdr->read32le(); 
+        uint32_t n_unk2=hdr->read32le(); 
+        uint32_t n_unk3=hdr->read32le(); 
+        uint32_t n_unk4=hdr->read32le(); 
+        uint32_t n_unk5=hdr->read32le(); 
+        printf("unknown: %6d %6d %6d %6d %08x\n", n_unk1, n_unk2, n_unk3, n_unk4, n_unk5);
+
+
         _pblob= hdr->read32le();
         _sblob= hdr->read32le();
         usage(_pblob, _sblob, "compressed blob");
@@ -524,16 +555,16 @@ public:
         for (int i=0 ; i<8 ; i++)
         {
             uint32_t sofs= hdr->read32le();
-            uint32_t sl1= hdr->read32le();
-            uint32_t sl2= hdr->read32le();
+            uint32_t snbytes= hdr->read32le();
+            uint32_t snchars= hdr->read32le();
             uint32_t snul= hdr->read32le();
-            if (sl1 || sl2)
-                printf("%08x:%08x(%+3d)  longstring\n", sofs, sl1, sl2-sl1);
+            if (snbytes || snchars)
+                printf("%08x:%08x:%08x  longstring\n", sofs, snbytes, snchars);
             if (snul)
                 printf("WARN: !=0: %08x\n", snul);
-            if (sl1) {
-                usage(sofs, sl1, "longstring");
-                _strs.push_back(strinfo(sofs, sl1));
+            if (snbytes) {
+                usage(sofs, snbytes, "longstring");
+                _strs.push_back(strinfo(sofs, snbytes));
             }
         }
     }
@@ -588,7 +619,7 @@ class IndexSection : public Section {
     uint32_t _ptable5;
     uint32_t _lwords;
     uint32_t _bm_count;
-    uint32_t _bm_ofs;
+    uint32_t _bm_ofs;   // todo: bitmap decoder
     uint32_t _bm_len;
 public:
     virtual uint32_t headersize() const { return (type()&0xfffffff0)==0x0030100 ? 0xb4 : 0xc0; }
@@ -600,43 +631,54 @@ public:
     {
         usage(0x10, headersize(), "index section header");
         ReadWriter_ptr hdr= makehdrreader();
-        hdr->setpos(0x10);
-        printf("idx: %08x %08x %08x %08x\n", hdr->read32le(), hdr->read32le(), hdr->read32le(), hdr->read32le());
+        hdr->setpos(16);
+
+        uint32_t unknown= hdr->read32le();
+        uint32_t size2= hdr->read32le();
+        uint32_t type2= hdr->read32le();
+        uint32_t flags= hdr->read32le();
+        if (unknown!=1)
+            printf("WARN: +16  !=1: %08x\n", unknown);
+        if (size2!=last-first)
+            printf("WARN: sectionsize mismatch: %08x (iso %08x)\n", size2, uint32_t(last-first));
+        if (type2!=type)
+            printf("WARN: sectiontype mismarch: %08x (iso %08x)\n", type2, type);
+        printf("flags: %08x\n", flags);
+
         uint32_t pstr1= hdr->read32le();
         uint32_t pstr2= hdr->read32le();
 
-        uint32_t lstr1= hdr->read32le();
-        uint32_t lstr1_2= hdr->read32le();
-        if (lstr1!=lstr1_2)
-            printf("WARN: strlen mismatch: %d!=%d\n", lstr1, lstr1_2);
-        uint32_t lstr2= hdr->read32le();
-        uint32_t lstr2_2= hdr->read32le();
-        if (lstr2!=lstr2_2)
-            printf("WARN: strlen mismatch: %d!=%d\n", lstr2, lstr2_2);
+        uint32_t lstr1bytes= hdr->read32le();
+        /*uint32_t lstr1chars=*/ hdr->read32le();
+        uint32_t lstr2bytes= hdr->read32le();
+        /*uint32_t lstr2chars=*/ hdr->read32le();
 
-        setname(readstr(pstr1, lstr1));
-        setdesc(readstr(pstr2, lstr2));
+        setname(readstr(pstr1, lstr1bytes));
+        setdesc(readstr(pstr2, lstr2bytes));
 
-        hdr->setpos(0x48);
+        printf("unknown: %08x %08x %08x %08x\n", hdr->read32le(), hdr->read32le(), hdr->read32le(), hdr->read32le());
+
         _count1= hdr->read32le();
-        uint32_t unk1= hdr->read32le();  // ??
+        uint32_t maxval= hdr->read32le();
+        printf("max t1 value: %08x\n", maxval);
+
         _count2= type==0x00030206 ? hdr->read32le() : 0;
         uint32_t unk2= hdr->read32le();
         uint32_t unk3= hdr->read32le();
         _ptable1= hdr->read32le();
         if (unk2!=_ptable1 || unk3!=_ptable1)
-            printf("unkptrs != tab1: %08x %08x\n", unk2, unk3);
+            printf("WARN: unkptrs != tab1: %08x %08x\n", unk2, unk3);
         _ptable2= hdr->read32le();
         _ptable3= hdr->read32le();
         uint32_t unk4= hdr->read32le();
         if (unk4!=_ptable3)
-            printf("unkptr != tab3: %08x\n", unk4);
+            printf("WARN: unkptr != tab3: %08x\n", unk4);
         _pwords= hdr->read32le();
         _ptable4= type==0x00030206 ? hdr->read32le() : 0;
         _ptable5= type==0x00030206 ? hdr->read32le() : 0;
         uint32_t unk5= hdr->read32le();
         if (unk5!=0)
-            printf("unkval!=0 : %08x\n", unk5);
+            printf("WARN: unkval!=0 : %08x\n", unk5);
         _lwords= hdr->read32le();
 
         usage(_ptable1, _count1*4, "table1");
