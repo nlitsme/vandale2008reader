@@ -9,6 +9,7 @@
 #include <set>
 #include <map>
 #include "args.h"
+#include "stringutils.h"
 
 class areausage {
     struct areainfo {
