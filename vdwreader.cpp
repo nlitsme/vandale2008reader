@@ -5,7 +5,7 @@
 #include "util/rw/MmapReader.h"
 #include "util/rw/CompressedReader.h"
 #include "compress/zlib.h"
-#include <array>
+#include <tr1/array>
 #include <set>
 #include <map>
 #include "args.h"
@@ -253,7 +253,7 @@ protected:
         hdr->read(&hdrdata[0], headersize());
 
         Md5 hash;
-        std::array<uint8_t,Md5::DigestSize> digest;
+        std::tr1::array<uint8_t,Md5::DigestSize> digest;
         hash.add(&hdrdata[16], hdrdata.size()-16);
         hash.final(&digest.front());
 
@@ -275,13 +275,14 @@ public:
     {
         usage(0, 16, "plain, section md5");
     }
+    virtual ~Section() { }
     const std::string& name() const { return _name; }
     const std::string& desc() const { return _desc; }
 
     void verify()
     {
         Md5 hash;
-        std::array<uint8_t,Md5::DigestSize> digest;
+        std::tr1::array<uint8_t,Md5::DigestSize> digest;
         hash.add(getptr(16), size()-16);
         hash.final(&digest.front());
 
@@ -715,6 +716,7 @@ public:
 //      else
 //          dump3();
     }
+    virtual ~IndexSection() { }
     virtual void saveall(const std::string& path)
     {
         savedata(_ptable1, _count1*4, path, "table1");
