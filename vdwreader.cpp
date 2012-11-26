@@ -5,7 +5,15 @@
 #include "util/rw/MmapReader.h"
 #include "util/rw/CompressedReader.h"
 #include "compress/zlib.h"
+
+#ifdef WITHINITIALIZERS
+#include <array>
+#define STDNAMESPACE std
+#else
 #include <tr1/array>
+#define STDNAMESPACE std::tr1
+#endif
+
 #include <set>
 #include <map>
 #include "args.h"
@@ -253,7 +261,7 @@ protected:
         hdr->read(&hdrdata[0], headersize());
 
         Md5 hash;
-        std::tr1::array<uint8_t,Md5::DigestSize> digest;
+        STDNAMESPACE::array<uint8_t,Md5::DigestSize> digest;
         hash.add(&hdrdata[16], hdrdata.size()-16);
         hash.final(&digest.front());
 
@@ -282,7 +290,7 @@ public:
     void verify()
     {
         Md5 hash;
-        std::tr1::array<uint8_t,Md5::DigestSize> digest;
+        STDNAMESPACE::array<uint8_t,Md5::DigestSize> digest;
         hash.add(getptr(16), size()-16);
         hash.final(&digest.front());
 
