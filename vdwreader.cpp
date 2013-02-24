@@ -48,7 +48,7 @@ public:
     void dump()
     {
         uint32_t ofs= 0;
-        for (auto i : _map)
+        for (auto const&i : _map)
         {
             if (ofs<i.first) {
                 printf("... gap: %08x-%08x\n", ofs, i.first);
@@ -1168,7 +1168,7 @@ public:
         BlobSection_ptr words= blob("idxTrefwoordCookieHtmlheadword");
         laps.push_back(t.lap());
 
-        for (auto i : s)
+        for (auto const&i : s)
             printf("%08x : %s\n", i, words->getitem(i).c_str());
         printf("\n");
 
