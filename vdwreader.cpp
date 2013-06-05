@@ -920,6 +920,10 @@ public:
         typedef std::string value_type;
         typedef std::random_access_iterator_tag iterator_category;
 
+        iterator(const iterator& i)
+            : _tab(i._tab), _words(i._words), _ix(i._ix)
+        {
+        }
         iterator(ReadWriter_ptr tab, ReadWriter_ptr words, uint32_t ix)
             : _tab(tab), _words(words), _ix(ix)
         {
