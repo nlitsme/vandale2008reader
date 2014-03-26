@@ -5,15 +5,7 @@
 #include "util/rw/MmapReader.h"
 #include "util/rw/CompressedReader.h"
 #include "compress/zlib.h"
-
-#ifdef WITHINITIALIZERS
 #include <array>
-#define STDNAMESPACE std
-#else
-#include <tr1/array>
-#define STDNAMESPACE std::tr1
-#endif
-
 #include <set>
 #include <map>
 #include "args.h"
@@ -261,7 +253,7 @@ protected:
         hdr->read(&hdrdata[0], headersize());
 
         Md5 hash;
-        STDNAMESPACE::array<uint8_t,Md5::DigestSize> digest;
+        std::array<uint8_t,Md5::DigestSize> digest;
         hash.add(&hdrdata[16], hdrdata.size()-16);
         hash.final(&digest.front());
 
@@ -290,7 +282,7 @@ public:
     void verify()
     {
         Md5 hash;
-        STDNAMESPACE::array<uint8_t,Md5::DigestSize> digest;
+        std::array<uint8_t,Md5::DigestSize> digest;
         hash.add(getptr(16), size()-16);
         hash.final(&digest.front());
 
@@ -932,6 +924,8 @@ public:
             : _ix(0)
         {
         }
+
+        // prefix opperator
         iterator& operator++()
         {
             _ix++;
@@ -942,6 +936,8 @@ public:
             _ix--;
             return *this;
         }
+
+        // postfix opperator
         iterator operator--(int)
         {
             iterator copy= *this;
@@ -991,6 +987,17 @@ public:
             //printf("striter[%08x->%08x]=%04x:%s\n", _ix, wofs, wlen, word.c_str());
             return word;
         }
+        stringiterator& operator++()
+        {
+            return (stringiterator&)iterator::operator++();
+        }
+        stringiterator operator++(int)
+        {
+            stringiterator i= *this;
+            iterator::operator++();
+            return i;
+        }
+
     };
 
     class substriterator : public iterator {
@@ -1011,6 +1018,17 @@ public:
             std::string word= _words->readstr(wofs+2+strofs, wlen-strofs);
             //printf("subiter[%08x->%08x:%04x]=%04x:%s\n", _ix, wofs, strofs, wlen, word.c_str());
             return word;
+        }
+        // note: clang++ has become more strict: have to duplicate operator++ here
+        substriterator& operator++()
+        {
+            return (substriterator&)iterator::operator++();
+        }
+        substriterator operator++(int)
+        {
+            substriterator i= *this;
+            iterator::operator++();
+            return i;
         }
     };
 };
@@ -1206,6 +1224,8 @@ int main(int argc, char**argv)
             case 'V': wantverify= true; break;
             case 'U': wantusage= true; break;
             case 'w': savepath= getstrarg(argv, i, argc); break;
+            default:
+                  printf("Usage: vdwreader [-V] [-U] [-w path] <dn|en|fn|nd|ne|nf|nn> words...\n");
         }
         else if (lang.empty())
             lang= argv[i];
