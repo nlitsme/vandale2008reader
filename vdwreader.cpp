@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <memory>
 #include "crypto/hash.h"
 #include "util/HiresTimer.h"
 #include "util/ReadWriter.h"
@@ -243,7 +244,15 @@ protected:
 
         ReadWriter_ptr srd= makexorreader(p, l);
 
-        return srd->readstr();
+        std::string result;
+        while (true)
+        {
+            char c = srd->read8();
+            if (c==0)
+                break;
+            result += c;
+        }
+        return result;
     }
     void verifyheader()
     {
@@ -336,7 +345,7 @@ public:
     {
     }
 };
-typedef boost::shared_ptr<Section> Section_ptr;
+typedef std::shared_ptr<Section> Section_ptr;
 
 class RootSection : public Section {
 
@@ -453,7 +462,7 @@ public:
         return true;
     }
 };
-typedef boost::shared_ptr<RootSection> RootSection_ptr;
+typedef std::shared_ptr<RootSection> RootSection_ptr;
 
 class BlobSection : public Section {
     uint32_t _nitems;
@@ -598,7 +607,11 @@ public:
         ReadWriter_ptr B= ReadWriter_ptr(new MemoryReader(getptr(_pblob)+blobofs+4, chunksize));
         ReadWriter_ptr Z= ReadWriter_ptr(new CompressedReader(B));
 
-        return Z->readstr(streamofs, itemsize);
+        std::string result(char(0), itemsize);
+        Z->setpos(streamofs);
+        Z->read((uint8_t*)&result[0], itemsize);
+
+        return result;
     }
 
     void dumpinfo()
@@ -608,7 +621,7 @@ public:
             printf("%8d : %s\n", i, getitem(i).c_str());
     }
 };
-typedef boost::shared_ptr<BlobSection> BlobSection_ptr;
+typedef std::shared_ptr<BlobSection> BlobSection_ptr;
 
 class IndexSection : public Section {
     uint32_t _count1;
@@ -740,7 +753,11 @@ public:
 
         ReadWriter_ptr wrd= makexorreader(_pwords, _lwords);
 
-        return wrd->readstr(wofs+2, eofs-wofs);
+        std::string result(char(0), eofs-wofs);
+        wrd->setpos(wofs+2);
+        wrd->read((uint8_t*)&result[0], eofs-wofs);
+
+        return result;
     }
     void dump45()
     {
@@ -982,8 +999,8 @@ public:
             _words->setpos(wofs);
             uint16_t wlen= _words->read16le();
 
-            std::string word;
-            _words->readstr(word, wlen);
+            std::string word(char(0), wlen);
+            _words->read((uint8_t*)&word[0], wlen);
             //printf("striter[%08x->%08x]=%04x:%s\n", _ix, wofs, wlen, word.c_str());
             return word;
         }
@@ -1015,9 +1032,12 @@ public:
             _words->setpos(wofs);
             uint16_t wlen= _words->read16le();
 
-            std::string word= _words->readstr(wofs+2+strofs, wlen-strofs);
+            std::string result(char(0), wlen-strofs);
+            _words->setpos(wofs+2+strofs);
+            _words->read((uint8_t*)&result[0], wlen-strofs);
+
             //printf("subiter[%08x->%08x:%04x]=%04x:%s\n", _ix, wofs, strofs, wlen, word.c_str());
-            return word;
+            return result;
         }
         // note: clang++ has become more strict: have to duplicate operator++ here
         substriterator& operator++()
@@ -1032,7 +1052,7 @@ public:
         }
     };
 };
-typedef boost::shared_ptr<IndexSection> IndexSection_ptr;
+typedef std::shared_ptr<IndexSection> IndexSection_ptr;
 
 // todo: FilesSection
 // todo: GxxSection
@@ -1113,7 +1133,7 @@ public:
     void dumpblobs()
     {
         std::for_each(_sections.begin(), _sections.end(), [](const sectionmap::value_type& i) {
-            BlobSection_ptr blob= boost::dynamic_pointer_cast<BlobSection>(i.second);
+            BlobSection_ptr blob= std::dynamic_pointer_cast<BlobSection>(i.second);
             if (blob)
                 blob->dumpinfo();
         });
@@ -1140,8 +1160,9 @@ public:
 
         ReadWriter_ptr cpr= makexorreader(2*_cplen+0x3e, 2*_cplen);
 
-        std::Wstring cp2;
-        cpr->readutf16le(cp2, _cplen);
+        std::Wstring cp2(uint16_t(0), _cplen);
+        // .. ignoring bigendian platforms
+        cpr->read((uint8_t*)&cp2[0], _cplen*2);
 
         if (ToString(cp2)!=copyright) {
             printf("copyright strings don't match\n");
@@ -1159,7 +1180,7 @@ public:
         auto i= _sections.find(name);
         if (i==_sections.end())
             throw "index not found";
-        IndexSection_ptr p= boost::dynamic_pointer_cast<IndexSection>(i->second);
+        IndexSection_ptr p= std::dynamic_pointer_cast<IndexSection>(i->second);
         if (!p)
             throw "name does not point to index";
         return p;
@@ -1169,7 +1190,7 @@ public:
         auto i= _sections.find(name);
         if (i==_sections.end())
             throw "blob not found";
-        BlobSection_ptr p= boost::dynamic_pointer_cast<BlobSection>(i->second);
+        BlobSection_ptr p= std::dynamic_pointer_cast<BlobSection>(i->second);
         if (!p)
             throw "name does not point to blob";
         return p;
