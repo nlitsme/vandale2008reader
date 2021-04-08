@@ -69,10 +69,6 @@ std::map<std::string,std::string> keymap= {
     { "nf", "382CBAE0-3040-47CD-9306-B575955EDF58" },
     { "nn", "C50C00B1-EFE9-4718-8B87-7DD6E6C9FB5D" },
 };
-std::string getpath(const std::string& tag)
-{
-    return stringformat("/Volumes/SnowLeopard/Applications/Van Dale Woordenboeken/g%s3.vdw", tag.c_str());
-}
 void calcmd5key(const std::string&key, uint8_t*md5key)
 {
     std::Wstring wkey= ToWString(key);
@@ -1238,6 +1234,7 @@ int main(int argc, char**argv)
     bool wantverify= false;
     bool wantusage= false;
     std::string savepath;
+    std::string apppath;
 
     for (int i=1 ; i<argc ; i++)
     {
@@ -1245,8 +1242,9 @@ int main(int argc, char**argv)
             case 'V': wantverify= true; break;
             case 'U': wantusage= true; break;
             case 'w': savepath= getstrarg(argv, i, argc); break;
+            case 'a': apppath= getstrarg(argv, i, argc); break;
             default:
-                  printf("Usage: vdwreader [-V] [-U] [-w path] <dn|en|fn|nd|ne|nf|nn> words...\n");
+                  printf("Usage: vdwreader [-V] [-U] [-a appdir] [-w path] <dn|en|fn|nd|ne|nf|nn> words...\n");
         }
         else if (lang.empty())
             lang= argv[i];
@@ -1261,7 +1259,7 @@ int main(int argc, char**argv)
     }
 
     try {
-    MmapReader r(getpath(lang), MmapReader::readonly);
+    MmapReader r(stringformat("%s/g%s3.vdw", apppath.c_str(), lang.c_str()), MmapReader::readonly);
 
     if (r.size()<16) {
         printf("vdw too short\n");
