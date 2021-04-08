@@ -1,35 +1,37 @@
 ITSLIB=$(HOME)/myprj/itslib
 all: vdwreader
 
-ifeq ($(D),)
-OPT=-O3
-else
-OPT=-O0
-endif
+cmake:
+	cmake -B build . $(if $(D),-DCMAKE_BUILD_TYPE=Debug,-DCMAKE_BUILD_TYPE=Release) $(CMAKEARGS)
+	$(MAKE) -C build $(if $(V),VERBOSE=1)
 
 clean:
 	$(RM) -r $(wildcard *.o) *.dSYM vdwreader
+	$(RM) -r build CMakeFiles CMakeCache.txt CMakeOutput.log
 
 vdwreader: vdwreader.o stringutils.o
 
-CXXFLAGS=-g -Wall -c $(OPT) -I $(ITSLIB)/include/itslib -D_UNIX -D_NO_RAPI -I /usr/local/opt/openssl/include -I . -std=c++17
+CFLAGS=-g -Wall $(if $(D),-O0,-O3)
+CFLAGS+=-I $(ITSLIB)/include/itslib
+CFLAGS+=-D_UNIX -D_NO_RAPI
+CFLAGS+=-I /usr/local/opt/openssl/include
+CFLAGS+=-I .
+
+CXXFLAGS=-std=c++17
 
 # include CDEFS from make commandline
-CXXFLAGS+=$(CDEFS) -MD
+CFLAGS+=$(CDEFS)
 
-LDFLAGS+=-g -Wall -L/usr/local/opt/openssl/lib -std=c++17 -lcrypto -lz
+LDFLAGS+=-g -Wall -L/usr/local/opt/openssl/lib -lcrypto -lz
 
 vpath .cpp $(ITSLIB)/src .
 
 %.o: $(ITSLIB)/src/%.cpp
-	$(CXX) $(CXXFLAGS) $^ -o $@ 
+	$(CXX) -c $(CFLAGS) $(CXXFLAGS) $^ -o $@ 
 
 %.o: %.cpp
-	$(CXX) $(CXXFLAGS) $(filter %.cpp,$^) -o $@ 
+	$(CXX) -c $(CFLAGS) $(CXXFLAGS) $(filter %.cpp,$^) -o $@ 
 
 %: %.o
 	$(CXX) $(LDFLAGS) $^ -o $@
 
-
-install:
-	cp ext2rd ~/bin/
