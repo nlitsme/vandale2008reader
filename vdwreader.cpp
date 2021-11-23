@@ -603,7 +603,7 @@ public:
         ReadWriter_ptr B= ReadWriter_ptr(new MemoryReader(getptr(_pblob)+blobofs+4, chunksize));
         ReadWriter_ptr Z= ReadWriter_ptr(new CompressedReader(B));
 
-        std::string result(char(0), itemsize);
+        std::string result; result.resize(itemsize);
         Z->setpos(streamofs);
         Z->read((uint8_t*)&result[0], itemsize);
 
@@ -749,7 +749,7 @@ public:
 
         ReadWriter_ptr wrd= makexorreader(_pwords, _lwords);
 
-        std::string result(char(0), eofs-wofs);
+        std::string result; result.resize(eofs-wofs);
         wrd->setpos(wofs+2);
         wrd->read((uint8_t*)&result[0], eofs-wofs);
 
@@ -915,8 +915,8 @@ public:
 
     class iterator {
     protected:
-        ReadWriter_ptr _tab;
-        ReadWriter_ptr _words;
+        mutable ReadWriter_ptr _tab;
+        mutable ReadWriter_ptr _words;
         uint32_t _ix;
     public:
         typedef std::string& reference;
@@ -988,14 +988,14 @@ public:
         {
         }
         stringiterator() { }
-        std::string operator*()
+        std::string operator*() const
         {
             _tab->setpos(4*_ix);
             uint32_t wofs= _tab->read32le();
             _words->setpos(wofs);
             uint16_t wlen= _words->read16le();
 
-            std::string word(char(0), wlen);
+            std::string word; word.resize(wlen);
             _words->read((uint8_t*)&word[0], wlen);
             //printf("striter[%08x->%08x]=%04x:%s\n", _ix, wofs, wlen, word.c_str());
             return word;
@@ -1020,7 +1020,7 @@ public:
         {
         }
         substriterator() { }
-        std::string operator*()
+        std::string operator*() const
         {
             _tab->setpos(6*_ix);
             uint32_t wofs= _tab->read32le();
@@ -1028,7 +1028,7 @@ public:
             _words->setpos(wofs);
             uint16_t wlen= _words->read16le();
 
-            std::string result(char(0), wlen-strofs);
+            std::string result; result.resize(wlen-strofs);
             _words->setpos(wofs+2+strofs);
             _words->read((uint8_t*)&result[0], wlen-strofs);
 
@@ -1156,7 +1156,7 @@ public:
 
         ReadWriter_ptr cpr= makexorreader(2*_cplen+0x3e, 2*_cplen);
 
-        std::Wstring cp2(uint16_t(0), _cplen);
+        std::Wstring cp2; cp2.resize(_cplen);
         // .. ignoring bigendian platforms
         cpr->read((uint8_t*)&cp2[0], _cplen*2);
 
