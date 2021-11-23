@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.10)
 project(vdwreader)
 set(CMAKE_CXX_STANDARD 17)
-list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake_find")
 
 if (${CMAKE_SYSTEM_NAME} MATCHES "Linux")
     set(LINUX TRUE)
@@ -34,21 +34,23 @@ if (WIN32)
     add_definitions(-DNOMINMAX -DNOGDI)
 endif()
 
-add_library(itslib ../../itslib/src/stringutils.cpp)
-target_include_directories(itslib PUBLIC ../../itslib/include/itslib)
-target_compile_definitions(itslib PUBLIC _UNIX _NO_RAPI)
-
+find_package(itslib REQUIRED)
 #add_library(cpputils INTERFACE)
 #target_include_directories(cpputils INTERFACE ../../cpputils)
 
 
 find_package(OpenSSL REQUIRED)
-find_package(ZLIB REQUIRED)
+find_package(Boost REQUIRED date_time)
+#find_package(ZLIB REQUIRED)
+include(cmake_libs/zlib.cmake)
 
 add_executable(vdwreader ${CMAKE_SOURCE_DIR}/vdwreader.cpp)
 target_link_libraries(vdwreader OpenSSL::Crypto)
-target_link_libraries(vdwreader ZLIB::ZLIB)
+#target_link_libraries(vdwreader ZLIB::ZLIB)
+target_link_libraries(vdwreader zlib)
 target_link_libraries(vdwreader itslib)
+target_link_libraries(vdwreader Boost::headers Boost::date_time)
+target_link_directories(vdwreader PUBLIC ${Boost_LIBRARY_DIRS})
 #target_link_libraries(vdwreader cpputils)
 
 
