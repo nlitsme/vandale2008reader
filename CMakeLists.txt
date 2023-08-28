@@ -36,7 +36,7 @@ endif()
 
 find_package(itslib REQUIRED)
 
-find_package(OpenSSL REQUIRED)
+find_package(openssl REQUIRED)
 find_package(Boost REQUIRED date_time)
 #find_package(ZLIB REQUIRED)
 find_package(zlib)
